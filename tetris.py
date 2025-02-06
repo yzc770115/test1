@@ -157,7 +157,15 @@ class Tetris:
         pygame.display.set_caption('Tetris')
         self.clock = pygame.time.Clock()
         
-        # 加载音效
+        # 初始化音效属性为None
+        self.move_sound = None
+        self.rotate_sound = None
+        self.drop_sound = None
+        self.clear_sound = None
+        self.game_over_sound = None
+        self.sounds_loaded = False
+        
+        # 尝试加载音效
         try:
             self.move_sound = pygame.mixer.Sound('sounds/move.wav')
             self.rotate_sound = pygame.mixer.Sound('sounds/rotate.wav')
@@ -170,8 +178,9 @@ class Tetris:
             pygame.mixer.music.set_volume(0.5)  # 设置音量为50%
             
             self.sounds_loaded = True
-        except:
-            print("Warning: Could not load one or more sound files")
+            print("所有音效文件加载成功！")
+        except Exception as e:
+            print(f"警告：无法加载音效文件: {str(e)}")
             self.sounds_loaded = False
         
         # 添加游戏状态
@@ -248,8 +257,11 @@ class Tetris:
     
     def play_sound(self, sound):
         """安全地播放音效"""
-        if self.sounds_loaded and sound:
-            sound.play()
+        if self.sounds_loaded and sound is not None:
+            try:
+                sound.play()
+            except:
+                print("播放音效时出错")
     
     def start_background_music(self):
         """开始播放背景音乐"""
