@@ -3,11 +3,11 @@ import sys
 import random
 
 # 初始化常量
-WINDOW_WIDTH = 800
-WINDOW_HEIGHT = 700
+WINDOW_HEIGHT = 800  # 基准高度
+WINDOW_WIDTH = int(WINDOW_HEIGHT * 9/16)  # 根据9:16比例计算宽度 (约450)
 GRID_SIZE = 30
 GRID_WIDTH = 10
-GRID_HEIGHT = 20
+GRID_HEIGHT = 16
 
 # 颜色定义
 BLACK = (0, 0, 0)
@@ -122,6 +122,34 @@ SHAPE_COLORS = {
     'Z': (255, 0, 0)      # 红色
 }
 
+class Particle:
+    """表示单个粒子的类"""
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.size = random.randint(2, 4)
+        # 随机速度和方向
+        self.vx = random.uniform(-2, 2)
+        self.vy = random.uniform(-3, 0)
+        self.life = 1.0  # 生命值从1递减到0
+
+    def update(self):
+        """更新粒子位置和生命值"""
+        self.x += self.vx
+        self.vy += 0.1  # 重力效果
+        self.y += self.vy
+        self.life -= 0.02  # 逐渐消失
+        return self.life > 0
+
+    def draw(self, screen):
+        """绘制粒子"""
+        alpha = int(self.life * 255)
+        color = (*self.color, alpha)
+        surf = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        pygame.draw.rect(surf, color, (0, 0, self.size, self.size))
+        screen.blit(surf, (self.x, self.y))
+
 class Button:
     def __init__(self, x, y, width, height, text, color):
         self.rect = pygame.Rect(x, y, width, height)
@@ -183,8 +211,8 @@ class Tetris:
             print(f"警告：无法加载音效文件: {str(e)}")
             self.sounds_loaded = False
         
-        # 添加游戏状态
-        self.game_state = 'menu'  # 'menu', 'playing', 'game_over', 'level_complete'
+        # 在游戏状态中添加暂停状态
+        self.game_state = 'menu'  # 'menu', 'playing', 'paused', 'game_over', 'level_complete'
         
         # 定义关卡相关的属性
         self.level_score_goals = {
@@ -202,26 +230,79 @@ class Tetris:
         button_width = 200
         button_height = 50
         button_x = WINDOW_WIDTH // 2 - button_width // 2
-        button_y = WINDOW_HEIGHT // 2 - button_height // 2
+        button_y = WINDOW_HEIGHT * 7 // 8 - button_height // 2  # 修改这里，将按钮移到屏幕底部1/8处
         self.start_button = Button(button_x, button_y, button_width, button_height, 
                                  "START GAME", (0, 100, 0))
         
         # 定义底部边距
         self.bottom_margin = 50  # 添加底部边距
         
+        # 加载背景图片
+        try:
+            self.menu_bg = pygame.image.load('images/menu_bg.jpg')
+            self.menu_bg = pygame.transform.scale(self.menu_bg, (WINDOW_WIDTH, WINDOW_HEIGHT))
+            self.game_bg = pygame.image.load('images/game_bg.jpg')  # 添加游戏背景
+            self.game_bg = pygame.transform.scale(self.game_bg, (WINDOW_WIDTH, WINDOW_HEIGHT))
+            print("背景图片加载成功！")
+        except Exception as e:
+            print(f"警告：无法加载背景图片: {str(e)}")
+            self.menu_bg = None
+            self.game_bg = None
+        
+        # 创建暂停按钮
+        pause_button_width = 100
+        pause_button_height = 40
+        pause_button_x = 20  # 左边距
+        pause_button_y = WINDOW_HEIGHT - pause_button_height - 20  # 底部边距
+        self.pause_button = Button(pause_button_x, pause_button_y, 
+                                 pause_button_width, pause_button_height, 
+                                 "PAUSE", (100, 100, 100))  # 灰色按钮
+        
+        # 创建暂停界面的按钮
+        button_width = 200
+        button_height = 50
+        button_spacing = 20  # 按钮之间的间距
+        
+        # 计算按钮位置，使其在屏幕中央
+        resume_button_x = WINDOW_WIDTH // 2 - button_width // 2
+        resume_button_y = WINDOW_HEIGHT // 2 - button_height - button_spacing // 2
+        
+        quit_button_x = WINDOW_WIDTH // 2 - button_width // 2
+        quit_button_y = WINDOW_HEIGHT // 2 + button_spacing // 2
+        
+        self.resume_button = Button(resume_button_x, resume_button_y, 
+                                  button_width, button_height, 
+                                  "RESUME", (0, 100, 0))  # 绿色按钮
+        
+        self.quit_button = Button(quit_button_x, quit_button_y, 
+                                button_width, button_height, 
+                                "QUIT", (100, 0, 0))  # 红色按钮
+        
         # 初始化游戏相关属性
         self.initialize_game()
         self.state_change_time = 0  # 用于控制状态切换的计时
+        self.particles = []  # 添加粒子列表
     
     def initialize_game(self):
         """初始化游戏相关的所有属性"""
-        # 修改游戏区域的位置，确保底部有足够空间
-        top_margin = 20
+        # 游戏区域位置参数
+        self.side_margin = (WINDOW_WIDTH - (GRID_SIZE * GRID_WIDTH)) // 2  # 水平居中
+        self.top_margin = 200  # 顶部边距
+        
         self.game_area = pygame.Rect(
-            WINDOW_WIDTH // 2 - (GRID_SIZE * GRID_WIDTH) // 2,  # 水平居中
-            top_margin,  # 顶部边距
+            self.side_margin,
+            self.top_margin,
             GRID_SIZE * GRID_WIDTH,
             GRID_SIZE * GRID_HEIGHT
+        )
+        
+        # 调整预览区域位置到屏幕顶部
+        preview_size = 4 * GRID_SIZE
+        self.preview_area = pygame.Rect(
+            WINDOW_WIDTH - preview_size - 20,  # 右侧边距20像素
+            20,  # 顶部边距20像素
+            preview_size,
+            preview_size
         )
         
         # 确保游戏区域底部不会超出窗口
@@ -229,15 +310,7 @@ class Tetris:
             # 如果超出，向上调整游戏区域
             self.game_area.y = WINDOW_HEIGHT - GRID_SIZE * GRID_HEIGHT - self.bottom_margin
         
-        # 预览区域位置相应调整
-        preview_size = 4 * GRID_SIZE
-        self.preview_area = pygame.Rect(
-            self.game_area.left - preview_size - 50,
-            self.game_area.top + 50,
-            preview_size,
-            preview_size
-        )
-        
+        # 初始化其他属性
         self.score = 0
         self.level = 1
         self.board = [[None for x in range(GRID_WIDTH)] for y in range(GRID_HEIGHT)]
@@ -321,12 +394,24 @@ class Tetris:
         # 检查并处理消行
         self.clear_lines()
     
+    def create_particles(self, row):
+        """为消除的行创建粒子效果"""
+        for x in range(GRID_WIDTH):
+            if self.board[row][x]:
+                color = SHAPE_COLORS[self.board[row][x]]
+                # 为每个方块创建多个粒子
+                for _ in range(15):  # 每个方块15个粒子
+                    px = self.game_area.left + x * GRID_SIZE + random.randint(0, GRID_SIZE)
+                    py = self.game_area.top + row * GRID_SIZE + random.randint(0, GRID_SIZE)
+                    self.particles.append(Particle(px, py, color))
+
     def clear_lines(self):
         """检查并清除已填满的行"""
         lines_cleared = 0
         y = GRID_HEIGHT - 1
         while y >= 0:
             if self.is_line_full(y):
+                self.create_particles(y)  # 在消除行之前创建粒子
                 self.remove_line(y)
                 lines_cleared += 1
             else:
@@ -355,7 +440,6 @@ class Tetris:
     
     def draw_piece(self):
         """绘制当前方块"""
-        # 添加安全检查
         if not self.current_piece or self.game_state != 'playing':
             return
         
@@ -365,7 +449,8 @@ class Tetris:
                     rect = pygame.Rect(
                         self.game_area.left + (self.current_x + x) * GRID_SIZE,
                         self.game_area.top + (self.current_y + y) * GRID_SIZE,
-                        GRID_SIZE, GRID_SIZE
+                        GRID_SIZE,
+                        GRID_SIZE
                     )
                     pygame.draw.rect(self.screen, SHAPE_COLORS[self.current_shape], rect)
                     pygame.draw.rect(self.screen, WHITE, rect, 1)
@@ -378,22 +463,23 @@ class Tetris:
                     rect = pygame.Rect(
                         self.game_area.left + x * GRID_SIZE,
                         self.game_area.top + y * GRID_SIZE,
-                        GRID_SIZE, GRID_SIZE
+                        GRID_SIZE,
+                        GRID_SIZE
                     )
                     pygame.draw.rect(self.screen, SHAPE_COLORS[self.board[y][x]], rect)
                     pygame.draw.rect(self.screen, WHITE, rect, 1)
     
     def draw_grid(self):
-        """绘制游戏区域网格"""
-        for x in range(GRID_WIDTH + 1):  # +1 确保绘制最右边的线
+        """绘制网格"""
+        for x in range(GRID_WIDTH + 1):
             pygame.draw.line(
-                self.screen, 
+                self.screen,
                 GRAY,
                 (self.game_area.left + x * GRID_SIZE, self.game_area.top),
                 (self.game_area.left + x * GRID_SIZE, self.game_area.bottom)
             )
-            
-        for y in range(GRID_HEIGHT + 1):  # +1 确保绘制最底部的线
+        
+        for y in range(GRID_HEIGHT + 1):
             pygame.draw.line(
                 self.screen,
                 GRAY,
@@ -427,9 +513,10 @@ class Tetris:
     def draw_score(self):
         """绘制分数"""
         font = pygame.font.Font(None, 36)
-        # 将分数显示移到右侧
         score_text = font.render(f'SCORE: {self.score}', True, WHITE)
-        self.screen.blit(score_text, (self.game_area.right + 20, 20))
+        # 调整分数显示位置到屏幕顶部
+        score_pos = (20, 20)  # 左上角位置
+        self.screen.blit(score_text, score_pos)
     
     def hard_drop(self):
         """方块快速下落到底部"""
@@ -487,12 +574,14 @@ class Tetris:
     def draw_level_info(self):
         """绘制关卡信息"""
         font = pygame.font.Font(None, 36)
-        # 将关卡信息移到右侧
+        # 调整关卡信息显示位置
         level_text = font.render(f'LEVEL: {self.level}', True, WHITE)
-        self.screen.blit(level_text, (self.game_area.right + 20, 60))
+        level_pos = (20, 60)  # 分数下方
+        self.screen.blit(level_text, level_pos)
         
         goal_text = font.render(f'GOAL: {self.level_score_goals[self.level]}', True, WHITE)
-        self.screen.blit(goal_text, (self.game_area.right + 20, 100))
+        goal_pos = (20, 100)  # 关卡信息下方
+        self.screen.blit(goal_text, goal_pos)
     
     def draw_level_complete(self):
         """绘制关卡完成画面"""
@@ -512,11 +601,11 @@ class Tetris:
     
     def draw_menu(self):
         """绘制主菜单界面"""
-        # 绘制游戏标题
-        font = pygame.font.Font(None, 74)
-        title = font.render("TETRIS", True, WHITE)
-        title_rect = title.get_rect(center=(WINDOW_WIDTH//2, WINDOW_HEIGHT//4))
-        self.screen.blit(title, title_rect)
+        # 绘制背景图片
+        if self.menu_bg:
+            self.screen.blit(self.menu_bg, (0, 0))
+        else:
+            self.screen.fill(BLACK)
         
         # 绘制开始按钮
         self.start_button.draw(self.screen)
@@ -546,6 +635,27 @@ class Tetris:
         self.screen.blit(score_text, score_rect)
         self.screen.blit(return_text, return_rect)
     
+    def draw_pause_screen(self):
+        """绘制暂停界面"""
+        # 创建半透明的黑色遮罩
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+        overlay.fill(BLACK)
+        overlay.set_alpha(128)  # 设置透明度
+        self.screen.blit(overlay, (0, 0))
+        
+        # 绘制按钮
+        self.resume_button.draw(self.screen)
+        self.quit_button.draw(self.screen)
+
+    def update_particles(self):
+        """更新所有粒子的状态"""
+        self.particles = [p for p in self.particles if p.update()]
+
+    def draw_particles(self):
+        """绘制所有粒子"""
+        for particle in self.particles:
+            particle.draw(self.screen)
+
     def run(self):
         while True:
             current_time = pygame.time.get_ticks()
@@ -560,9 +670,14 @@ class Tetris:
                     if self.start_button.handle_event(event):
                         self.game_state = 'playing'
                         self.initialize_game()
-                        self.start_background_music()  # 开始游戏时播放背景音乐
+                        self.start_background_music()
                 
                 elif self.game_state == 'playing':
+                    # 处理暂停按钮点击
+                    if self.pause_button.handle_event(event):
+                        self.game_state = 'paused'
+                        pygame.mixer.music.pause()
+                    
                     if event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_LEFT:
                             self.current_x -= 1
@@ -593,6 +708,20 @@ class Tetris:
                             self.lock_piece()
                             self.new_piece()
                 
+                elif self.game_state == 'paused':
+                    # 处理暂停界面的按钮点击
+                    if self.resume_button.handle_event(event):
+                        self.game_state = 'playing'
+                        pygame.mixer.music.unpause()
+                    elif self.quit_button.handle_event(event):
+                        self.game_state = 'menu'
+                        pygame.mixer.music.stop()  # 停止背景音乐
+                    
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_p:
+                            self.game_state = 'playing'
+                            pygame.mixer.music.unpause()
+                
                 elif self.game_state == 'game_over':
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                         self.game_state = 'menu'
@@ -611,13 +740,45 @@ class Tetris:
                         self.new_piece()
                     self.last_fall_time = current_time
                 
-                self.screen.fill(BLACK)
+                # 绘制游戏背景
+                if self.game_bg:
+                    self.screen.blit(self.game_bg, (0, 0))
+                else:
+                    self.screen.fill(BLACK)
+                
                 pygame.draw.rect(self.screen, WHITE, self.game_area, 2)
                 self.draw_grid()
                 self.draw_board()
                 self.draw_piece()
                 self.draw_score()
                 self.draw_preview()
+                self.draw_level_info()
+                
+                # 更新和绘制粒子效果
+                self.update_particles()
+                self.draw_particles()
+                
+                # 绘制暂停按钮
+                self.pause_button.text = "PAUSE"
+                self.pause_button.draw(self.screen)
+            
+            elif self.game_state == 'paused':
+                # 先绘制游戏画面
+                if self.game_bg:
+                    self.screen.blit(self.game_bg, (0, 0))
+                else:
+                    self.screen.fill(BLACK)
+                
+                pygame.draw.rect(self.screen, WHITE, self.game_area, 2)
+                self.draw_grid()
+                self.draw_board()
+                self.draw_piece()
+                self.draw_score()
+                self.draw_preview()
+                self.draw_level_info()
+                
+                # 在游戏画面上绘制暂停界面
+                self.draw_pause_screen()
             
             elif self.game_state == 'game_over':
                 # 保持游戏画面，在上面绘制游戏结束信息
